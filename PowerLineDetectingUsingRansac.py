@@ -17,14 +17,17 @@ from skimage.measure import LineModelND, ransac
 # First we will see the initial classification received from the device
 with laspy.open('./data/GKR_550_149_region_of_interest_scaled.las') as inputLas:
     print('Points from Header:', inputLas.header.point_count)
-    las = inputLas.read()
+    readLas = inputLas.read()
+    las = laspy.LasData(readLas.header)
+    las.points = readLas.points.copy()
+    print('Las data:')
     print(las)
     print('Points from data:', len(las.points))
-    groundPts = las.classification == 2
-    unclassified = las.classification == 1
-    water = las.classification == 9
+    groundPts = las.points.classification == 2
+    unclassified = las.points.classification == 1
+    water = las.points.classification == 9
     vegetation = np.logical_and(
-        las.classification == 3, las.classification == 4)
+        las.points.classification == 3, las.points.classification == 4)
 
     bins, counts = np.unique(las.return_number[groundPts], return_counts=True)
 
@@ -52,8 +55,9 @@ with laspy.open('./data/GKR_550_149_region_of_interest_scaled.las') as inputLas:
     # We found out that we mainly  received points classified as  ground.
     # In order to find the power cord lines we will need to make a subset on the original image set points.
     # In this refrence it is stated that the return values that we should be searching for are 2 and 3  https://www.usna.edu/Users/oceano/pguth/md_help/html/LidarReturnClassification.htm
-    pointsOfInterest = las[las.return_number[groundPts] > 1]
-    averageGroundHeight = las[las.return_number[groundPts] == 1]['Z'].mean()
+    pointsOfInterest = las.points[las.points.return_number[groundPts] > 1]
+    averageGroundHeight = las.points[las.points.return_number[groundPts] == 1]['Z'].mean(
+    )
     pointsForRansac = []
     for p in pointsOfInterest:
         if p['Z'] - averageGroundHeight > 100:
@@ -81,14 +85,28 @@ with laspy.open('./data/GKR_550_149_region_of_interest_scaled.las') as inputLas:
             zIndexOfOriginalImg = np.where(
                 las['Z'] == possibleCordPoints[idx][2])
             # intersecting indexes to find the actual point in the original image
-            lasIdx = np.intersect1d(np.intersect1d(np.where(las['Z'] == possibleCordPoints[idx][2]), np.where(
-                las['X'] == possibleCordPoints[idx][0])), np.where(las['Y'] == possibleCordPoints[idx][1]))
+            lasIdx = np.intersect1d(np.intersect1d(np.where(las.points['Z'] == possibleCordPoints[idx][2]), np.where(
+                las.points['X'] == possibleCordPoints[idx][0])), np.where(las.points['Y'] == possibleCordPoints[idx][1]))
             # setting its classification value as power line
-            las[lasIdx].classification = 16
+            las.points[lasIdx].classification = 16
+            print(las.points[lasIdx].raw_classification[0])
         startRange += stepIncrease
         endRange += stepIncrease
         if endRange >= len(possibleCordPoints) and startRange < len(possibleCordPoints):
             endRange = startRange+(len(possibleCordPoints)-startRange-1)
-    outputFile = laspy.LasData(inputLas.header)
-    outputFile.points = las
-    outputFile.write("powerLineClassified.las")
+
+    powerLinePts = las.points.classification == 16
+    print('Power Line points:')
+    print(powerLinePts)
+    binsPowerLine, countsPowerLine = np.unique(
+        las.points.return_number[powerLinePts], return_counts=True)
+    print('Vegetation Point Return Number distribution:')
+    for r, c in zip(binsPowerLine, countsPowerLine):
+        print('    {}:{}'.format(r, c))
+
+    # outputFile = laspy.LasData(inputLas.header)
+    # outputFile.points = las
+    # outputFile.write("powerLineClassified.las")
+    with laspy.open("powerLineClassified.las", mode="w", header=las.header) as writer:
+        # for points in las.chunk_iterator(1_234_567):
+        writer.write_points(las.points)
